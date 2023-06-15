@@ -10,13 +10,16 @@ import shutil
 import zipfile
 import xml.etree.ElementTree as ET
 import re
+from packaging import version
+
 
 class Settings(object):
   def __new__(cls):
     if not hasattr(cls, 'instance'):
-      cls.instance = super(Settings, cls).__new__(cls)
-      cls.config=None
-      cls.workFolder="tmp"
+        cls.instance = super(Settings, cls).__new__(cls)
+        cls.config = configparser.ConfigParser()
+        cls.config.read('config.ini')
+        cls.workFolder="tmp"
     return cls.instance
   
 
@@ -89,8 +92,7 @@ def main(argv):
         - firmo il pacchetto
         - deploy del pacchetto / yaml / installazioni su server
     """
-    Settings().config = configparser.ConfigParser()
-    Settings().config.read('config.ini')
+    
 
 
     parser = argparse.ArgumentParser(description="Create Zip64 files.")
@@ -107,6 +109,7 @@ def main(argv):
     jmp =True
 
     if not jmp:
+        pass
         #preparo la cartella di lavoro
         prepareWorkFolder()
 
@@ -138,36 +141,79 @@ def main(argv):
                     f.write(zip.read("Public/index.db"))
 
 
-    
-    #NOTE: non ho usato l'xml Parser xke durante la riscrittura del file combinava casini e il "MakeAppx" dava problemi ( non riusciva a verificare la correttezza dell' xml)
-    #patch appManifest.xml in modo che  "Identity" corrisponda alla firma
-    xml= None
-    with open(f"{Settings().workFolder}/sourceNew/AppxManifest.xml", 'r') as file:
-        xml = file.read()
+        #patch appManifest.xml in modo che  "Identity" corrisponda alla firma e cambio la versione
 
-    xml = re.sub("Publisher=\"[^\\\"]*\"", f'Publisher="CN={Settings().config["certificate"]["CN"]}, O={Settings().config["certificate"]["O"]}, C={Settings().config["certificate"]["C"]}"', xml)
-   
+        #NOTE: non ho usato l'xml Parser xke durante la riscrittura del file combinava casini e il "MakeAppx" dava problemi ( non riusciva a verificare la correttezza dell' xml)
+        xml= None
+        with open(f"{Settings().workFolder}/sourceNew/AppxManifest.xml", 'r') as file:
+            xml = file.read()
 
-    #NOTE: lo spazio davanti a " Version" SERVE!! altrimenti va a prendere l'attributo "MinVersion"
-    if Settings().config["version"]["versionType"]=="auto":
-        #TODO:
-        pass
-    elif Settings().config["version"]["versionType"]=="static":
-        xml = re.sub(" Version=\"[^\\\"]*\"", f' Version="{Settings().config["version"]["staticVersion"]}"', xml)
+        xml = re.sub("Publisher=\"[^\\\"]*\"", f'Publisher="CN={Settings().config["certificate"]["CN"]}, O={Settings().config["certificate"]["O"]}, C={Settings().config["certificate"]["C"]}"', xml)
+
+
+        #NOTE: lo spazio davanti a " Version" SERVE!! altrimenti va a prendere l'attributo "MinVersion"
+        if Settings().config["version"]["versionType"]=="auto":
+            #scarico la vecchia versione
+            url = f'{Settings().config["deploy-ftp"]["baseURL"]}/source.msix'
+            r = requests.get(url, allow_redirects=True)
+            open(f'{Settings().workFolder}/sourceOld.msix', 'wb').write(r.content)
+            #estraggo il file AppxManifest.xml
+            with zipfile.ZipFile(f'{Settings().workFolder}/source.msix', 'r') as zip:
+                with open(f"{Settings().workFolder}/AppxManifestOld.xml", 'wb') as f:
+                        f.write(zip.read("AppxManifest.xml"))
+
+            #recupero la vecchia versione
+            xmlOld= None
+            with open(f"{Settings().workFolder}/AppxManifestOld.xml", 'r') as file:
+                xmlOld = file.read()
+            m = re.search(" Version=\"([^\\\"]*)\"",xmlOld,re.M)
+            v = version.parse(m.groups()[0]) 
+            l=list(v.release)
+            l[3]+=1
+            l = [str(el) for el in l]
+            newVersion=".".join(l)
+            xml = re.sub(" Version=\"[^\\\"]*\"", f' Version="{newVersion}"', xml)
+
+
+            #cancello i file temporanei
+            os.remove(f"{Settings().workFolder}/AppxManifestOld.xml")
+            os.remove(f'{Settings().workFolder}/sourceOld.msix')
+            
+        elif Settings().config["version"]["versionType"]=="static":
+            xml = re.sub(" Version=\"[^\\\"]*\"", f' Version="{Settings().config["version"]["staticVersion"]}"', xml)
+            
+        elif Settings().config["version"]["versionType"]=="origin":
+            
+            #estraggo il file AppxManifest.xml dal sorgente scaricato in precedenza
+            with zipfile.ZipFile(f'{Settings().workFolder}/source.msix', 'r') as zip:
+                with open(f"{Settings().workFolder}/AppxManifestForVersion.xml", 'wb') as f:
+                        f.write(zip.read("AppxManifest.xml"))
+
+            #recupero la versione
+            xmlSource= None
+            with open(f"{Settings().workFolder}/AppxManifestForVersion.xml", 'r') as file:
+                xmlSource = file.read()
+            m = re.search(" Version=\"([^\\\"]*)\"",xmlSource,re.M)
+            xml = re.sub(" Version=\"[^\\\"]*\"", f' Version="{m.groups()[0]}"', xml)
+
+            #cancello i file temporanei
+            os.remove(f"{Settings().workFolder}/AppxManifestForVersion.xml")
+
+
+            pass
+        else:
+            assert True, "INI error: [version][versionType] not valid"
         
-    elif Settings().config["version"]["versionType"]=="origin":
-        #TODO:
-        pass
-    else:
-        assert True, "INI error: [version][versionType] not valid"
+
+        with open(f"{Settings().workFolder}/sourceNew/AppxManifest.xml", 'w') as file:
+            file.write(xml)
     
 
-    with open(f"{Settings().workFolder}/sourceNew/AppxManifest.xml", 'w') as file:
-        file.write(xml)
     
+
+
     #TODO: 
     """
-        - modificare l'appManifest xml in modo che  "Identity" corrisponda alla firma
         - modificare il db e mantenere i programmi che mi servono
         - scaricare i file yaml di tutti i programmi che mi servono 
         - scarico le risorse in locale
