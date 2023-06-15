@@ -139,3 +139,104 @@ ad ogni aggiornamento
 	
 MakeAppx pack /d source2 /p test.msix /nv 
 signtool sign /fd SHA256 /a /f D:\source\repos\winget-lc\certificate\MyCert.pfx /p cerPassSecret sourceNew.msix
+
+
+
+
+
+
+
+
+
+
+
+
+Query per pulire il db 
+
+DELETE from ids where ids.id not in ('Notepad++.Notepad++', 'Microsoft.VisualStudioCode')
+DELETE from manifest where id not in (SELECT rowid from ids) 
+DELETE from names where rowid not in (SELECT DISTINCT name from manifest) 
+DELETE from monikers where rowid not in (SELECT DISTINCT moniker from manifest) 
+DELETE from versions where rowid not in (SELECT DISTINCT version from manifest) 
+DELETE from commands_map where manifest not in (SELECT DISTINCT rowid from manifest) 
+DELETE from commands where rowid not in (SELECT DISTINCT command from commands_map)
+DELETE from norm_names_map where manifest not in (SELECT DISTINCT rowid from manifest) 
+DELETE from norm_names where rowid not in (SELECT DISTINCT norm_name from norm_names_map)
+DELETE from norm_publishers_map where manifest not in (SELECT DISTINCT rowid from manifest) 
+DELETE from norm_publishers where rowid not in (SELECT DISTINCT norm_publisher from norm_publishers_map)
+DELETE from pfns_map where manifest not in (SELECT DISTINCT rowid from manifest) 
+DELETE from pfns where rowid not in (SELECT DISTINCT pfn from pfns_map)
+DELETE from productcodes_map where manifest not in (SELECT DISTINCT rowid from manifest) 
+DELETE from productcodes where rowid not in (SELECT DISTINCT productcode from productcodes_map)
+DELETE from tags_map where manifest not in (SELECT DISTINCT rowid from manifest) 
+DELETE from tags where rowid not in (SELECT DISTINCT tag from tags_map)
+DELETE from upgradecodes_map where manifest not in (SELECT DISTINCT rowid from manifest) 
+DELETE from upgradecodes where rowid not in (SELECT DISTINCT upgradecode from upgradecodes_map)
+
+
+
+#per cancellare i pathpart ricorsivi
+#in breve la prima parte prima di UNION ALL viene eseguita una volta sola e prende l'ultimo pathpart ( quello dal manifest ) 
+#nella seconda parte continuo a collegare i pathpart presi in precedenza con altri, finchè ci sono parent 
+#sotto cancello le rowid non nella selezione
+
+
+	WITH RECURSIVE all_tree_pathparts (rowid,parent) AS (
+		SELECT p1.rowid,p1.parent
+		FROM pathparts p1
+		WHERE p1.rowid in (SELECT pathpart from manifest ) 
+
+		UNION ALL
+
+		SELECT  p.rowid,p.parent
+		FROM pathparts p
+		JOIN all_tree_pathparts c ON p.rowid = c.parent
+	)
+
+	delete from pathparts where rowid not in ( SELECT DISTINCT rowid FROM all_tree_pathparts)
+
+
+
+
+#stessa query aggiornata ma adesso la parte ricorsiva è unica sia per la cancellazione che per selezione
+#with recursive va comunque ripetuto prima della select / delete!!
+
+	WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
+		SELECT p1.parent,p1.pathpart
+		FROM pathparts p1
+		WHERE p1.rowid in (SELECT pathpart from manifest ) 
+
+		UNION ALL
+
+		SELECT  p.parent,p.pathpart || '\' || c.path, c.rowidLastElement
+		FROM pathparts p
+		JOIN all_tree_pathparts c ON p.rowid = c.parent
+	)
+	delete from pathparts where rowid not in ( SELECT DISTINCT parent FROM all_tree_pathparts);
+
+
+	SELECT * FROM all_tree_pathparts where parent is NULL
+	
+	
+	
+	
+#recupera l'ultima versione per ogni programama
+Select * from (SELECT * from manifest GROUP BY id having version = max(version)) as t INNER JOIN versions on ( versions.rowid = t.version ) 
+
+#recupera i pathpart degli yaml da scaricare ( ultima versione ) -> unione delle 2 query precedenti
+
+	WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
+		SELECT p1.parent,p1.pathpart,p1.rowid 
+		FROM pathparts p1
+		WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having version = max(version)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
+
+		UNION ALL
+
+		SELECT  p.parent,p.pathpart || '\' || c.path, c.rowidLastElement
+		FROM pathparts p
+		JOIN all_tree_pathparts c ON p.rowid = c.parent
+	)
+
+	SELECT * FROM all_tree_pathparts where parent is NULL
+	
+	
