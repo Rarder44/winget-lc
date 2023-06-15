@@ -1,0 +1,135 @@
+https://stackoverflow.com/questions/61916158/structure-of-winget-source-repositories
+https://stackoverflow.com/questions/19958829/where-can-i-find-makecert-exe-visual-studio-ultimate-2012
+https://learn.microsoft.com/en-us/windows/win32/appxpkg/how-to-create-a-package-signing-certificate
+
+
+
+C:\Program Files (x86)\Windows Kits\...\bin\x64
+
+
+Generare un certificato
+
+	.\MakeCert -n "CN=Contoso Software, O=Contoso Corporation, C=US" -r -h 0 -eku "1.3.6.1.5.5.7.3.3,1.3.6.1.4.1.311.10.3.13" -e "01/01/2050" -sv D:\Temp\MyKey.pvk D:\Temp\MyKey.cer
+	.\Pvk2Pfx -pvk D:\Temp\MyKey.pvk -pi test -spc D:\Temp\MyKey.cer -pfx D:\Temp\MyKey.pfx
+	Certutil -addStore TrustedPeople D:\Temp\MyKey.cer
+
+	#Certutil -store TrustedPeople
+	#con il comando sopra prendo l'id del certificato ( tipo questo qua sotto ) 
+	#bfdb42ea40c755b74db2ae413fb31f79 seriale per cancellare con ->
+
+	Certutil -delStore TrustedPeople bfdb42ea40c755b74db2ae413fb31f79
+
+
+ALTRO MODO ( POWERSHELL NUOVO! ) 
+
+	$cert = New-SelfSignedCertificate -Type Custom -KeySpec Signature -Subject "CN=Contoso Software, O=Contoso Corporation, C=US" -KeyExportPolicy Exportable -CertStoreLocation "Cert:\CurrentUser\My" -KeyUsageProperty Sign  -NotAfter (Get-Date).AddYears(5) -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3,1.3.6.1.4.1.311.10.3.13")
+	Export-Certificate -Cert $cert -FilePath user.cer
+	$CertPassword = ConvertTo-SecureString -String "test" -Force –AsPlainText
+	Export-PfxCertificate -Cert $cert -FilePath user.pfx -Password $CertPassword
+
+
+	( forse devo cmq registrarlo con certutil? ) 
+
+
+#http://timestamp.digicert.com
+
+
+
+
+uso msix pack... tool
+edit il pacchetto base
+ci metto il nuovo db modificato
+salvo le modifiche firmando il pacchetto
+pubblico il pacchetto con nome "source.msix" nella cartella
+
+
+https://cdn.winget.microsoft.com/cache/source.msix
+https://cdn.winget.microsoft.com/cache/manifests/n/Notepad++/Notepad++/8.5.3/96f2-Notepad++.Notepad++.yaml
+
+
+https://lpozzi.it/winget/manifests/n/Notepad++/Notepad++/8.5.3/96f2-Notepad++.Notepad++.yaml
+
+
+http://timestamp.digicert.com
+
+
+winget show MyNotepad++.Notepad++
+Si è verificato un errore imprevisto durante l'esecuzione del comando:
+0x8a15003f : The source data is corrupted or tampered
+
+
+winget source add -n test https://lpozzi.it/winget/
+
+
+
+
+TODO: mi ricordo di disistallare questi pacchetti!! ( e di rimuovere il source test )
+ winget list --name winget
+
+
+apertura connessione ssh :
+	ssh -l master 192.168.100.128
+
+installare programma
+	winget install Putty.Putty -v 0.74.0.0 --scope machine
+
+
+risoluzione problema admin
+	usare la 1.5.441-preview
+	
+	
+per firmare C:\Program Files (x86)\Windows Kits\10\bin\10.0.22000.0\x64\signtool 
+	set PATH=%PATH%;C:\Program Files (x86)\Windows Kits\10\bin\10.0.22000.0\x64
+	SignTool sign /fd SHA256  /a /f D:\Temp\winget\MyKey.pfx /p test D:\Temp\winget\source.msix
+	
+	./zip64.py test.zip Assets Public AppxManifest.xml
+	set PATH=%PATH%;C:\Program Files (x86)\Windows Kits\10\bin\10.0.22000.0\x64
+	SignTool sign /fd SHA256  /a /f D:\Temp\winget\MyKey.pfx /p test test.msix
+	
+	
+	signtool.exe sign /fd SHA256 /a /f D:\Temp\winget\MyKey.pfx /p test Public.zip
+	
+	
+	
+	
+COMANDI MAGICI!!!
+creo un pacchetto partendo dai dati nella cartella "source2" e creo un file msix 
+	MakeAppx esclude in automatico i file xml che vengono rigenerati e prende in automatico AppxManifest.xml
+	ATTENZIONE l'appmanifest "source" originale sembra che ha un errore: manca un file PNG... 
+	basta o creare il file o modificare l'xml in modo che punti ad un file esistente
+	oppure ( come fatto ) basta mettere il tag /nv  e se ne frega degli errori 
+	
+	signtool va a firmare con la chiave pfx (generata come sopra )
+	usa "MyKey.pfx" con password "test" e firma "test.msix"
+	ATTENZIONE: in base al file pfx occorre nel appmanifest ( prima di fare il sign, quindi prima del MakeApp assicurarsi che l'identity ( tra i primi tag ) 
+	corrispondano con i dati del certificato!!! ( soprattutto il Publisher ) 
+	<Identity Name="Microsoft.Winget.Source2" ProcessorArchitecture="neutral" Publisher="CN=Contoso Software, O=Contoso Corporation, C=US" Version="2023.609.1322.0" />
+  
+
+		MakeAppx pack /d source2 /p test.msix /nv 
+		signtool sign /fd SHA256 /a /f D:\Temp\winget\MyKey.pfx /p test test.msix
+		
+		
+	
+query x modifica /lettura del blob
+SELECT HEX(hash) FROM manifest where pathpart= 63476
+UPDATE manifest SET hash = x'7c153ca5c38a8b8dc8c311fbddc70e6eab412fae03570376fdc9f6c95241b0ce' where pathpart= 63476
+
+
+
+preparazione:
+	- creare la firma
+	- installare la firma come valida
+
+ad ogni aggiornamento
+	- scaricare il file source.msix
+	- patchare i problemi di appManifest.xml ???
+	- modificare l'appManifest xml in modo che  "Identity" corrisponda alla firma
+	- modificare il db e mantenere i programmi che mi servono
+	- scaricare i file yaml di tutti i programmi che mi servono 
+	- scarico le risorse in locale
+	- modificare i file yaml puntando alle risorse in locale
+	- faccio l'hash SHA256 di ogni file yaml e li metto nel DB ( manifest -> hash  ) 
+	- creo il pacchetto msix
+	- firmo il pacchetto
+	- deploy del pacchetto / yaml / installazioni su server
