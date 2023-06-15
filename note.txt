@@ -133,3 +133,9 @@ ad ogni aggiornamento
 	- creo il pacchetto msix
 	- firmo il pacchetto
 	- deploy del pacchetto / yaml / installazioni su server
+	
+	
+	
+	
+MakeAppx pack /d source2 /p test.msix /nv 
+signtool sign /fd SHA256 /a /f D:\source\repos\winget-lc\certificate\MyCert.pfx /p cerPassSecret sourceNew.msix
