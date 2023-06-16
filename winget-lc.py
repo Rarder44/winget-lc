@@ -100,7 +100,7 @@ def main(argv):
 
 
 
-    jmp =True
+    jmp =False
 
     if not jmp:
         pass
@@ -249,7 +249,7 @@ def main(argv):
     fileToDownloads = [{"id":row[2],"path":row[1]} for row in cur.execute("""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
 		SELECT p1.parent,p1.pathpart,p1.rowid 
 		FROM pathparts p1
-		WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having version = max(version)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
+		WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having rowid = max(rowid)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
 
 		UNION ALL
 
@@ -260,6 +260,8 @@ def main(argv):
 
 	SELECT * FROM all_tree_pathparts where parent is NULL""")]
 
+
+    
 
     #scaricare i file yaml di tutti i programmi che mi servono 
     if not os.path.exists(f'{Settings().workFolder}/ftp'):
@@ -277,6 +279,7 @@ def main(argv):
         - faccio l'hash SHA256 di ogni file yaml e li metto nel DB ( manifest -> hash  ) 
     """
 
+    con.close()
 
     #creo il pacchetto msix
     os.environ['PATH'] += os.pathsep + Settings().config['DEFAULT']['WindowsKitFolder']
@@ -287,6 +290,7 @@ def main(argv):
     os.system(f"signtool sign /fd SHA256 /a /f {Settings().config['certificate']['savePath']}/{Settings().config['certificate']['certificateName']}.pfx " +
               f"/p {Settings().config['certificate']['password']} {Settings().workFolder}/sourceNew.msix ")
     
+    shutil.move(f"{Settings().workFolder}/sourceNew.msix",f"{Settings().workFolder}/ftp/source.msix")
     #TODO: deploy del pacchetto / yaml / installazioni su server
 
 
