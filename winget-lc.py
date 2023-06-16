@@ -203,7 +203,7 @@ def main(argv):
             file.write(xml)
     
 
-
+    #modificare il db e mantenere i programmi che mi servono
     packetIDsFormatted=",".join([ f"'{s.strip()}'" for s in Settings().config["winget"]["packetIDs"].split(",")])
     print(packetIDsFormatted)
     
@@ -260,13 +260,18 @@ def main(argv):
 
 	SELECT * FROM all_tree_pathparts where parent is NULL""")]
 
-    print(fileToDownloads)
-    
 
+    #scaricare i file yaml di tutti i programmi che mi servono 
+    if not os.path.exists(f'{Settings().workFolder}/ftp'):
+        os.makedirs(f'{Settings().workFolder}/ftp',exist_ok=True)
+
+    for el in fileToDownloads:
+        download( f'{Settings().config["winget"]["source"]}/{el["path"]}',f'{Settings().workFolder}/ftp/{el["path"]}')
+
+
+    
     #TODO: 
     """
-        - modificare il db e mantenere i programmi che mi servono
-        - scaricare i file yaml di tutti i programmi che mi servono 
         - scarico le risorse in locale
         - modificare i file yaml puntando alle risorse in locale
         - faccio l'hash SHA256 di ogni file yaml e li metto nel DB ( manifest -> hash  ) 
@@ -285,9 +290,13 @@ def main(argv):
     #TODO: deploy del pacchetto / yaml / installazioni su server
 
 
-def debug():
-    
-    
+def download(url,localPath):
+    r = requests.get(url, allow_redirects=True)
+    folderToCreate= os.path.dirname(localPath)
+    if not os.path.exists(folderToCreate):
+        os.makedirs(folderToCreate,exist_ok=True)
+
+    open(localPath, 'wb').write(r.content)
     pass
     
 
