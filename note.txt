@@ -202,7 +202,7 @@ DELETE from upgradecodes where rowid not in (SELECT DISTINCT upgradecode from up
 #with recursive va comunque ripetuto prima della select / delete!!
 
 	WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
-		SELECT p1.parent,p1.pathpart
+		SELECT p1.parent,p1.pathpart,p1.rowid 
 		FROM pathparts p1
 		WHERE p1.rowid in (SELECT pathpart from manifest ) 
 

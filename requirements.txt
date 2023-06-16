@@ -1,1 +1,3 @@
 packaging
+pyuac
+PyWin32

@@ -1,7 +1,7 @@
 import sys
 import logging
 import argparse
-import configparser
+
 import os.path
 import subprocess
 import pyuac
@@ -11,28 +11,22 @@ import zipfile
 import xml.etree.ElementTree as ET
 import re
 from packaging import version
+from settings import Settings
+import sqlite3
 
 
-class Settings(object):
-  def __new__(cls):
-    if not hasattr(cls, 'instance'):
-        cls.instance = super(Settings, cls).__new__(cls)
-        cls.config = configparser.ConfigParser()
-        cls.config.read('config.ini')
-        cls.workFolder="tmp"
-    return cls.instance
   
 
 def powershell(command):
    return subprocess.run(["powershell", "-command", command], capture_output=True)
 
-def generateCertificate(outputPath, fileName, CN,O,C, eku, expire,password ):
+def generateCertificate(outputPath, fileName, cerPublisher, eku, expire,password ):
     #genera un certificato con i parametri passati
     winKit= getWindowsKitFolder()
     if not os.path.exists(outputPath):   
         os.mkdir(outputPath)
 
-    cmd=f""" $cert = New-SelfSignedCertificate -Type Custom -KeySpec Signature -Subject "CN={CN}, O={O}, C={C}" -KeyExportPolicy Exportable -CertStoreLocation "Cert:\CurrentUser\My" -KeyUsageProperty Sign  -NotAfter '{expire}' -TextExtension @("2.5.29.37={{text}}{eku}");
+    cmd=f""" $cert = New-SelfSignedCertificate -Type Custom -KeySpec Signature -Subject "{cerPublisher}" -KeyExportPolicy Exportable -CertStoreLocation "Cert:\CurrentUser\My" -KeyUsageProperty Sign  -NotAfter '{expire}' -TextExtension @("2.5.29.37={{text}}{eku}");
             Export-Certificate -Cert $cert -FilePath {outputPath}\{fileName}.cer;
             $CertPassword = ConvertTo-SecureString -String "{password}" -Force -AsPlainText;
             Export-PfxCertificate -Cert $cert -FilePath {outputPath}\{fileName}.pfx -Password $CertPassword;"""
@@ -117,9 +111,7 @@ def main(argv):
         if( args.regen_key or not isCertificatePresent()):
             generateCertificate(Settings().config["certificate"]["savePath"],
                                 Settings().config["certificate"]["certificateName"],
-                                Settings().config["certificate"]["CN"],
-                                Settings().config["certificate"]["O"],
-                                Settings().config["certificate"]["C"],
+                                Settings().cerPublisher,
                                 Settings().config["certificate"]["eku"],
                                 Settings().config["certificate"]["expire"],
                                 Settings().config["certificate"]["password"])
@@ -130,6 +122,8 @@ def main(argv):
 
         #copio la cartella sourceDefault nella workFolder
         shutil.copytree("sourceDefault",f'{Settings().workFolder}/sourceNew')
+        if not os.path.exists(f'{Settings().workFolder}/sourceNew/Public'):
+            os.mkdir(f'{Settings().workFolder}/sourceNew/Public')
 
         #scaricare il file source.msix
         url = f'{Settings().config["winget"]["source"]}/source.msix'
@@ -148,7 +142,7 @@ def main(argv):
         with open(f"{Settings().workFolder}/sourceNew/AppxManifest.xml", 'r') as file:
             xml = file.read()
 
-        xml = re.sub("Publisher=\"[^\\\"]*\"", f'Publisher="CN={Settings().config["certificate"]["CN"]}, O={Settings().config["certificate"]["O"]}, C={Settings().config["certificate"]["C"]}"', xml)
+        xml = re.sub("Publisher=\"[^\\\"]*\"", f'Publisher="{Settings().cerPublisher}"', xml)
 
 
         #NOTE: lo spazio davanti a " Version" SERVE!! altrimenti va a prendere l'attributo "MinVersion"
@@ -210,7 +204,64 @@ def main(argv):
     
 
 
+    packetIDsFormatted=",".join([ f"'{s.strip()}'" for s in Settings().config["winget"]["packetIDs"].split(",")])
+    print(packetIDsFormatted)
+    
+    con = sqlite3.connect(f"{Settings().workFolder}/sourceNew/Public/index.db")
+    
+    cur = con.cursor()
+    cur.execute(f"DELETE from ids where ids.id not in ({packetIDsFormatted})")
+    cur.execute(f"DELETE from manifest where id not in (SELECT rowid from ids) ")
+    cur.execute(f"DELETE from names where rowid not in (SELECT DISTINCT name from manifest) ")
+    cur.execute(f"DELETE from monikers where rowid not in (SELECT DISTINCT moniker from manifest) ")
+    cur.execute(f"DELETE from versions where rowid not in (SELECT DISTINCT version from manifest) ")
+    cur.execute(f"DELETE from commands_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+    cur.execute(f"DELETE from commands where rowid not in (SELECT DISTINCT command from commands_map)")
+    cur.execute(f"DELETE from norm_names_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+    cur.execute(f"DELETE from norm_names where rowid not in (SELECT DISTINCT norm_name from norm_names_map)")
+    cur.execute(f"DELETE from norm_publishers_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+    cur.execute(f"DELETE from norm_publishers where rowid not in (SELECT DISTINCT norm_publisher from norm_publishers_map)")
+    cur.execute(f"DELETE from pfns_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+    cur.execute(f"DELETE from pfns where rowid not in (SELECT DISTINCT pfn from pfns_map)")
+    cur.execute(f"DELETE from productcodes_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+    cur.execute(f"DELETE from productcodes where rowid not in (SELECT DISTINCT productcode from productcodes_map)")
+    cur.execute(f"DELETE from tags_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+    cur.execute(f"DELETE from tags where rowid not in (SELECT DISTINCT tag from tags_map)")
+    cur.execute(f"DELETE from upgradecodes_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+    cur.execute(f"DELETE from upgradecodes where rowid not in (SELECT DISTINCT upgradecode from upgradecodes_map)")
 
+
+    cur.execute(f"""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
+		SELECT p1.parent,p1.pathpart,p1.rowid 
+		FROM pathparts p1
+		WHERE p1.rowid in (SELECT pathpart from manifest ) 
+
+		UNION ALL
+
+		SELECT  p.parent,p.pathpart || '\' || c.path, c.rowidLastElement
+		FROM pathparts p
+		JOIN all_tree_pathparts c ON p.rowid = c.parent
+	)
+	delete from pathparts where rowid not in ( SELECT DISTINCT parent FROM all_tree_pathparts)""")
+    con.commit()
+
+
+    fileToDownloads = [{"id":row[2],"path":row[1]} for row in cur.execute("""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
+		SELECT p1.parent,p1.pathpart,p1.rowid 
+		FROM pathparts p1
+		WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having version = max(version)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
+
+		UNION ALL
+
+		SELECT  p.parent,p.pathpart || '/' || c.path, c.rowidLastElement
+		FROM pathparts p
+		JOIN all_tree_pathparts c ON p.rowid = c.parent
+	)
+
+	SELECT * FROM all_tree_pathparts where parent is NULL""")]
+
+    print(fileToDownloads)
+    
 
     #TODO: 
     """
