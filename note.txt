@@ -240,3 +240,21 @@ Select * from (SELECT * from manifest GROUP BY id having version = max(version))
 	SELECT * FROM all_tree_pathparts where parent is NULL
 	
 	
+
+
+
+
+#riordina gli id del manifest
+
+	create temp table Tmp(NewID, OldID);
+	insert into Tmp Select ROW_NUMBER () OVER (ORDER BY rowid) RowNum, rowid from manifest;
+	select * from Tmp;
+	UPDATE manifest SET rowid = (SELECT NewID FROM Tmp WHERE Tmp.OldID = manifest.rowid );
+	UPDATE commands_map SET manifest = (SELECT NewID FROM Tmp WHERE Tmp.OldID = commands_map.manifest );                        
+	UPDATE norm_names_map SET manifest = (SELECT NewID FROM Tmp WHERE Tmp.OldID = norm_names_map.manifest );   
+	UPDATE norm_publishers_map SET manifest = (SELECT NewID FROM Tmp WHERE Tmp.OldID = norm_publishers_map.manifest );  						 
+	UPDATE productcodes_map SET manifest = (SELECT NewID FROM Tmp WHERE Tmp.OldID = productcodes_map.manifest ); 					 
+	UPDATE upgradecodes_map SET manifest = (SELECT NewID FROM Tmp WHERE Tmp.OldID = upgradecodes_map.manifest ); 		
+	UPDATE tags_map SET manifest = (SELECT NewID FROM Tmp WHERE Tmp.OldID = tags_map.manifest ); 		
+	UPDATE pfns_map SET manifest = (SELECT NewID FROM Tmp WHERE Tmp.OldID = pfns_map.manifest ); 			
+	DROP TABLE Tmp;

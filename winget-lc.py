@@ -13,9 +13,13 @@ import re
 from packaging import version
 from settings import Settings
 import sqlite3
+import yaml
+import os
+from urllib.parse import urlparse
+import urllib.request
+from tqdm import tqdm
+import hashlib
 
-
-  
 
 def powershell(command):
    return subprocess.run(["powershell", "-command", command], capture_output=True)
@@ -126,11 +130,10 @@ def main(argv):
             os.mkdir(f'{Settings().workFolder}/sourceNew/Public')
 
         #scaricare il file source.msix
-        url = f'{Settings().config["winget"]["source"]}/source.msix'
-        r = requests.get(url, allow_redirects=True)
-        open(f'{Settings().workFolder}/source.msix', 'wb').write(r.content)
+        originSourceLocal= f'{Settings().workFolder}/source.msix'
+        download(f'{Settings().config["winget"]["source"]}/source.msix',originSourceLocal)
         #estraggo i file
-        with zipfile.ZipFile(f'{Settings().workFolder}/source.msix', 'r') as zip:
+        with zipfile.ZipFile(originSourceLocal, 'r') as zip:
             with open(f"{Settings().workFolder}/sourceNew/Public/index.db", 'wb') as f:
                     f.write(zip.read("Public/index.db"))
 
@@ -148,11 +151,12 @@ def main(argv):
         #NOTE: lo spazio davanti a " Version" SERVE!! altrimenti va a prendere l'attributo "MinVersion"
         if Settings().config["version"]["versionType"]=="auto":
             #scarico la vecchia versione
-            url = f'{Settings().config["deploy-ftp"]["baseURL"]}/source.msix'
-            r = requests.get(url, allow_redirects=True)
-            open(f'{Settings().workFolder}/sourceOld.msix', 'wb').write(r.content)
+
+            download(f'{Settings().config["deploy-ftp"]["baseURL"]}/source.msix',f'{Settings().workFolder}/sourceOld.msix')
+
+
             #estraggo il file AppxManifest.xml
-            with zipfile.ZipFile(f'{Settings().workFolder}/source.msix', 'r') as zip:
+            with zipfile.ZipFile(f'{Settings().workFolder}/sourceOld.msix', 'r') as zip:
                 with open(f"{Settings().workFolder}/AppxManifestOld.xml", 'wb') as f:
                         f.write(zip.read("AppxManifest.xml"))
 
@@ -214,7 +218,9 @@ def main(argv):
     cur.execute(f"DELETE from manifest where id not in (SELECT rowid from ids) ")
     cur.execute(f"DELETE from names where rowid not in (SELECT DISTINCT name from manifest) ")
     cur.execute(f"DELETE from monikers where rowid not in (SELECT DISTINCT moniker from manifest) ")
-    cur.execute(f"DELETE from versions where rowid not in (SELECT DISTINCT version from manifest) ")
+
+    cur.execute(f"DELETE from versions where rowid not in (SELECT DISTINCT version from manifest union SELECT DISTINCT arp_min_version from manifest union SELECT DISTINCT arp_max_version from manifest) ")
+
     cur.execute(f"DELETE from commands_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
     cur.execute(f"DELETE from commands where rowid not in (SELECT DISTINCT command from commands_map)")
     cur.execute(f"DELETE from norm_names_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
@@ -246,7 +252,7 @@ def main(argv):
     con.commit()
 
 
-    fileToDownloads = [{"id":row[2],"path":row[1]} for row in cur.execute("""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
+    yamlToDownloads = [{"id":row[2],"path":row[1]} for row in cur.execute("""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
 		SELECT p1.parent,p1.pathpart,p1.rowid 
 		FROM pathparts p1
 		WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having rowid = max(rowid)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
@@ -264,20 +270,46 @@ def main(argv):
     
 
     #scaricare i file yaml di tutti i programmi che mi servono 
-    if not os.path.exists(f'{Settings().workFolder}/ftp'):
-        os.makedirs(f'{Settings().workFolder}/ftp',exist_ok=True)
+    os.makedirs(f'{Settings().workFolder}/ftp',exist_ok=True)
 
-    for el in fileToDownloads:
-        download( f'{Settings().config["winget"]["source"]}/{el["path"]}',f'{Settings().workFolder}/ftp/{el["path"]}')
+    for el in yamlToDownloads:
+
+        localYaml= f'{Settings().workFolder}/ftp/{el["path"]}'
+        os.makedirs(os.path.dirname(localYaml),exist_ok=True)
+
+        download( f'{Settings().config["winget"]["source"]}/{el["path"]}',localYaml)
+        #analisi dello yaml 
+        yamlData=None
+
+        with open(localYaml, "r") as stream:
+            yamlData= yaml.safe_load(stream)
+
+        #scarico tutti gli installers
+        i = 0
+        for installer in yamlData["Installers"]:
+            a = urlparse(installer["InstallerUrl"])
+            newFileName = f"{i}_{os.path.basename(a.path)}"
+            newFilePath=f"{Settings().workFolder}/ftp/{os.path.dirname(el['path'])}/{newFileName}"
+            newFileUrl= f'{Settings().config["deploy-ftp"]["baseURL"]}/{os.path.dirname(el["path"])}/{newFileName}'
+            download(installer["InstallerUrl"],newFilePath)
+            i=i+1
+            #modifico il link d'installazione
+            installer["InstallerUrl"]=newFileUrl
 
 
-    
-    #TODO: 
-    """
-        - scarico le risorse in locale
-        - modificare i file yaml puntando alle risorse in locale
-        - faccio l'hash SHA256 di ogni file yaml e li metto nel DB ( manifest -> hash  ) 
-    """
+        #scrivo le modifiche nello yaml
+        with open(localYaml, "w") as stream:
+            yaml.safe_dump(yamlData,stream)
+
+
+        #faccio l'hash SHA256 del file yaml e lo metto nel DB ( manifest -> hash  ) 
+        sha = sha256(localYaml)
+        cur.execute(f"UPDATE manifest SET hash = x'{sha}' where pathpart= {el['id']}")
+        con.commit()
+       
+
+
+
 
     con.close()
 
@@ -294,16 +326,27 @@ def main(argv):
     #TODO: deploy del pacchetto / yaml / installazioni su server
 
 
-def download(url,localPath):
-    r = requests.get(url, allow_redirects=True)
-    folderToCreate= os.path.dirname(localPath)
-    if not os.path.exists(folderToCreate):
-        os.makedirs(folderToCreate,exist_ok=True)
 
-    open(localPath, 'wb').write(r.content)
-    pass
-    
 
+class DownloadProgressBar(tqdm):
+    def update_to(self, b=1, bsize=1, tsize=None):
+        if tsize is not None:
+            self.total = tsize
+        self.update(b * bsize - self.n)
+
+def download(url, output_path):
+    with DownloadProgressBar(unit='B', unit_scale=True,
+                             miniters=1, desc=url.split('/')[-1]) as t:
+        urllib.request.urlretrieve(url, filename=output_path, reporthook=t.update_to)
+
+
+def sha256(filename):
+    sha256_hash = hashlib.sha256()
+    with open(filename,"rb") as f:
+        # Read and update hash string value in blocks of 4K
+        for byte_block in iter(lambda: f.read(4096),b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
 
 if __name__ == '__main__':
     #run as admin
