@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 import urllib.request
 from tqdm import tqdm
 import hashlib
-
+from ftplib import FTP, error_perm
 
 def powershell(command):
    return subprocess.run(["powershell", "-command", command], capture_output=True)
@@ -104,7 +104,7 @@ def main(argv):
 
 
 
-    jmp =False
+    jmp =True
 
     if not jmp:
         pass
@@ -207,123 +207,127 @@ def main(argv):
             file.write(xml)
     
 
-    #modificare il db e mantenere i programmi che mi servono
-    packetIDsFormatted=",".join([ f"'{s.strip()}'" for s in Settings().config["winget"]["packetIDs"].split(",")])
-    print(packetIDsFormatted)
-    
-    con = sqlite3.connect(f"{Settings().workFolder}/sourceNew/Public/index.db")
-    
-    cur = con.cursor()
-    cur.execute(f"DELETE from ids where ids.id not in ({packetIDsFormatted})")
-    cur.execute(f"DELETE from manifest where id not in (SELECT rowid from ids) ")
-    cur.execute(f"DELETE from names where rowid not in (SELECT DISTINCT name from manifest) ")
-    cur.execute(f"DELETE from monikers where rowid not in (SELECT DISTINCT moniker from manifest) ")
+        #modificare il db e mantenere i programmi che mi servono
+        packetIDsFormatted=",".join([ f"'{s.strip()}'" for s in Settings().config["winget"]["packetIDs"].split(",")])
+        print(packetIDsFormatted)
+        
+        con = sqlite3.connect(f"{Settings().workFolder}/sourceNew/Public/index.db")
+        
+        cur = con.cursor()
+        cur.execute(f"DELETE from ids where ids.id not in ({packetIDsFormatted})")
+        cur.execute(f"DELETE from manifest where id not in (SELECT rowid from ids) ")
+        cur.execute(f"DELETE from names where rowid not in (SELECT DISTINCT name from manifest) ")
+        cur.execute(f"DELETE from monikers where rowid not in (SELECT DISTINCT moniker from manifest) ")
 
-    cur.execute(f"DELETE from versions where rowid not in (SELECT DISTINCT version from manifest union SELECT DISTINCT arp_min_version from manifest union SELECT DISTINCT arp_max_version from manifest) ")
+        cur.execute(f"DELETE from versions where rowid not in (SELECT DISTINCT version from manifest union SELECT DISTINCT arp_min_version from manifest union SELECT DISTINCT arp_max_version from manifest) ")
 
-    cur.execute(f"DELETE from commands_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-    cur.execute(f"DELETE from commands where rowid not in (SELECT DISTINCT command from commands_map)")
-    cur.execute(f"DELETE from norm_names_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-    cur.execute(f"DELETE from norm_names where rowid not in (SELECT DISTINCT norm_name from norm_names_map)")
-    cur.execute(f"DELETE from norm_publishers_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-    cur.execute(f"DELETE from norm_publishers where rowid not in (SELECT DISTINCT norm_publisher from norm_publishers_map)")
-    cur.execute(f"DELETE from pfns_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-    cur.execute(f"DELETE from pfns where rowid not in (SELECT DISTINCT pfn from pfns_map)")
-    cur.execute(f"DELETE from productcodes_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-    cur.execute(f"DELETE from productcodes where rowid not in (SELECT DISTINCT productcode from productcodes_map)")
-    cur.execute(f"DELETE from tags_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-    cur.execute(f"DELETE from tags where rowid not in (SELECT DISTINCT tag from tags_map)")
-    cur.execute(f"DELETE from upgradecodes_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-    cur.execute(f"DELETE from upgradecodes where rowid not in (SELECT DISTINCT upgradecode from upgradecodes_map)")
-
-
-    cur.execute(f"""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
-		SELECT p1.parent,p1.pathpart,p1.rowid 
-		FROM pathparts p1
-		WHERE p1.rowid in (SELECT pathpart from manifest ) 
-
-		UNION ALL
-
-		SELECT  p.parent,p.pathpart || '\' || c.path, c.rowidLastElement
-		FROM pathparts p
-		JOIN all_tree_pathparts c ON p.rowid = c.parent
-	)
-	delete from pathparts where rowid not in ( SELECT DISTINCT parent FROM all_tree_pathparts)""")
-    con.commit()
+        cur.execute(f"DELETE from commands_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+        cur.execute(f"DELETE from commands where rowid not in (SELECT DISTINCT command from commands_map)")
+        cur.execute(f"DELETE from norm_names_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+        cur.execute(f"DELETE from norm_names where rowid not in (SELECT DISTINCT norm_name from norm_names_map)")
+        cur.execute(f"DELETE from norm_publishers_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+        cur.execute(f"DELETE from norm_publishers where rowid not in (SELECT DISTINCT norm_publisher from norm_publishers_map)")
+        cur.execute(f"DELETE from pfns_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+        cur.execute(f"DELETE from pfns where rowid not in (SELECT DISTINCT pfn from pfns_map)")
+        cur.execute(f"DELETE from productcodes_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+        cur.execute(f"DELETE from productcodes where rowid not in (SELECT DISTINCT productcode from productcodes_map)")
+        cur.execute(f"DELETE from tags_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+        cur.execute(f"DELETE from tags where rowid not in (SELECT DISTINCT tag from tags_map)")
+        cur.execute(f"DELETE from upgradecodes_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
+        cur.execute(f"DELETE from upgradecodes where rowid not in (SELECT DISTINCT upgradecode from upgradecodes_map)")
 
 
-    yamlToDownloads = [{"id":row[2],"path":row[1]} for row in cur.execute("""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
-		SELECT p1.parent,p1.pathpart,p1.rowid 
-		FROM pathparts p1
-		WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having rowid = max(rowid)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
+        cur.execute(f"""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
+            SELECT p1.parent,p1.pathpart,p1.rowid 
+            FROM pathparts p1
+            WHERE p1.rowid in (SELECT pathpart from manifest ) 
 
-		UNION ALL
+            UNION ALL
 
-		SELECT  p.parent,p.pathpart || '/' || c.path, c.rowidLastElement
-		FROM pathparts p
-		JOIN all_tree_pathparts c ON p.rowid = c.parent
-	)
-
-	SELECT * FROM all_tree_pathparts where parent is NULL""")]
-
-
-    
-
-    #scaricare i file yaml di tutti i programmi che mi servono 
-    os.makedirs(f'{Settings().workFolder}/ftp',exist_ok=True)
-
-    for el in yamlToDownloads:
-
-        localYaml= f'{Settings().workFolder}/ftp/{el["path"]}'
-        os.makedirs(os.path.dirname(localYaml),exist_ok=True)
-
-        download( f'{Settings().config["winget"]["source"]}/{el["path"]}',localYaml)
-        #analisi dello yaml 
-        yamlData=None
-
-        with open(localYaml, "r") as stream:
-            yamlData= yaml.safe_load(stream)
-
-        #scarico tutti gli installers
-        i = 0
-        for installer in yamlData["Installers"]:
-            a = urlparse(installer["InstallerUrl"])
-            newFileName = f"{i}_{os.path.basename(a.path)}"
-            newFilePath=f"{Settings().workFolder}/ftp/{os.path.dirname(el['path'])}/{newFileName}"
-            newFileUrl= f'{Settings().config["deploy-ftp"]["baseURL"]}/{os.path.dirname(el["path"])}/{newFileName}'
-            download(installer["InstallerUrl"],newFilePath)
-            i=i+1
-            #modifico il link d'installazione
-            installer["InstallerUrl"]=newFileUrl
-
-
-        #scrivo le modifiche nello yaml
-        with open(localYaml, "w") as stream:
-            yaml.safe_dump(yamlData,stream)
-
-
-        #faccio l'hash SHA256 del file yaml e lo metto nel DB ( manifest -> hash  ) 
-        sha = sha256(localYaml)
-        cur.execute(f"UPDATE manifest SET hash = x'{sha}' where pathpart= {el['id']}")
+            SELECT  p.parent,p.pathpart || '\' || c.path, c.rowidLastElement
+            FROM pathparts p
+            JOIN all_tree_pathparts c ON p.rowid = c.parent
+        )
+        delete from pathparts where rowid not in ( SELECT DISTINCT parent FROM all_tree_pathparts)""")
         con.commit()
-       
+
+
+        yamlToDownloads = [{"id":row[2],"path":row[1]} for row in cur.execute("""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
+            SELECT p1.parent,p1.pathpart,p1.rowid 
+            FROM pathparts p1
+            WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having rowid = max(rowid)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
+
+            UNION ALL
+
+            SELECT  p.parent,p.pathpart || '/' || c.path, c.rowidLastElement
+            FROM pathparts p
+            JOIN all_tree_pathparts c ON p.rowid = c.parent
+        )
+
+        SELECT * FROM all_tree_pathparts where parent is NULL""")]
+
+
+        
+
+        #scaricare i file yaml di tutti i programmi che mi servono 
+        os.makedirs(f'{Settings().workFolder}/ftp',exist_ok=True)
+
+        for el in yamlToDownloads:
+
+            localYaml= f'{Settings().workFolder}/ftp/{el["path"]}'
+            os.makedirs(os.path.dirname(localYaml),exist_ok=True)
+
+            download( f'{Settings().config["winget"]["source"]}/{el["path"]}',localYaml)
+            #analisi dello yaml 
+            yamlData=None
+
+            with open(localYaml, "r") as stream:
+                yamlData= yaml.safe_load(stream)
+
+            #scarico tutti gli installers
+            i = 0
+            for installer in yamlData["Installers"]:
+                a = urlparse(installer["InstallerUrl"])
+                newFileName = f"{i}_{os.path.basename(a.path)}"
+                newFilePath=f"{Settings().workFolder}/ftp/{os.path.dirname(el['path'])}/{newFileName}"
+                newFileUrl= f'{Settings().config["deploy-ftp"]["baseURL"]}/{os.path.dirname(el["path"])}/{newFileName}'
+                download(installer["InstallerUrl"],newFilePath)
+                i=i+1
+                #modifico il link d'installazione
+                installer["InstallerUrl"]=newFileUrl
+
+
+            #scrivo le modifiche nello yaml
+            with open(localYaml, "w") as stream:
+                yaml.safe_dump(yamlData,stream)
+
+
+            #faccio l'hash SHA256 del file yaml e lo metto nel DB ( manifest -> hash  ) 
+            sha = sha256(localYaml)
+            cur.execute(f"UPDATE manifest SET hash = x'{sha}' where pathpart= {el['id']}")
+            con.commit()
+        
 
 
 
 
-    con.close()
+        con.close()
 
-    #creo il pacchetto msix
-    os.environ['PATH'] += os.pathsep + Settings().config['DEFAULT']['WindowsKitFolder']
-    os.system(f"MakeAppx pack /d {Settings().workFolder}/sourceNew /p {Settings().workFolder}/sourceNew.msix /nv /o")
-    
+        #creo il pacchetto msix
+        os.environ['PATH'] += os.pathsep + Settings().config['DEFAULT']['WindowsKitFolder']
+        os.system(f"MakeAppx pack /d {Settings().workFolder}/sourceNew /p {Settings().workFolder}/sourceNew.msix /nv /o")
+        
 
-    #firmo il pacchetto
-    os.system(f"signtool sign /fd SHA256 /a /f {Settings().config['certificate']['savePath']}/{Settings().config['certificate']['certificateName']}.pfx " +
-              f"/p {Settings().config['certificate']['password']} {Settings().workFolder}/sourceNew.msix ")
-    
-    shutil.move(f"{Settings().workFolder}/sourceNew.msix",f"{Settings().workFolder}/ftp/source.msix")
-    #TODO: deploy del pacchetto / yaml / installazioni su server
+        #firmo il pacchetto
+        os.system(f"signtool sign /fd SHA256 /a /f {Settings().config['certificate']['savePath']}/{Settings().config['certificate']['certificateName']}.pfx " +
+                f"/p {Settings().config['certificate']['password']} {Settings().workFolder}/sourceNew.msix ")
+        
+        shutil.move(f"{Settings().workFolder}/sourceNew.msix",f"{Settings().workFolder}/ftp/source.msix")
+
+
+    #deploy del pacchetto / yaml / installazioni su server
+    if Settings().config["deploy-ftp"]["uploadViaFTP"].lower()=="true":
+        pushViaFTP()
 
 
 
@@ -347,6 +351,43 @@ def sha256(filename):
         for byte_block in iter(lambda: f.read(4096),b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
+
+def pushViaFTP():
+    ftp = myFTP(Settings().config["deploy-ftp"]["host"],Settings().config["deploy-ftp"]["username"],Settings().config["deploy-ftp"]["password"] )
+    ftp.remove_contents(Settings().config["deploy-ftp"]["FTPRemotePath"])
+    ftp.push_contents(f'{Settings().workFolder}/ftp',Settings().config["deploy-ftp"]["FTPRemotePath"])
+    pass
+
+
+
+
+
+
+class myFTP:
+    def __init__(self,host,user,pwd) -> None:
+        self.ftp = FTP(host)
+        self.ftp.login(user,pwd)
+        self.ftp.cwd(Settings().config["deploy-ftp"]["FTPRemotePath"]) 
+        pass
+
+    def remove_contents(self,path):
+        for (name, properties) in self.ftp.mlsd(path=path):
+            if name in ['.', '..']:
+                continue
+            elif properties['type'] == 'file':
+                self.ftp.delete(f"{path}/{name}")
+            elif properties['type'] == 'dir':
+                self.remove_contents(f"{path}/{name}")               
+                self.ftp.rmd(f"{path}/{name}")
+
+    def push_contents(self,localPath,remotePath):
+        if not os.path.exists(localPath):
+            return
+        
+        #TODO: completare la copia di tutti i file della cartella specificata nella path remota.
+        pass
+
+
 
 if __name__ == '__main__':
     #run as admin
