@@ -1,69 +1,20 @@
 import sys
-import logging
 import argparse
-
 import os.path
-import subprocess
 import pyuac
 import requests
 import shutil
 import zipfile
-import xml.etree.ElementTree as ET
 import re
 from packaging import version
-from settings import Settings
-import sqlite3
+from Include.settings import Settings
 import yaml
 import os
 from urllib.parse import urlparse
-import urllib.request
-from tqdm import tqdm
-import hashlib
-from ftplib import FTP, error_perm
 
-def powershell(command):
-   return subprocess.run(["powershell", "-command", command], capture_output=True)
-
-def generateCertificate(outputPath, fileName, cerPublisher, eku, expire,password ):
-    #genera un certificato con i parametri passati
-    winKit= getWindowsKitFolder()
-    if not os.path.exists(outputPath):   
-        os.mkdir(outputPath)
-
-    cmd=f""" $cert = New-SelfSignedCertificate -Type Custom -KeySpec Signature -Subject "{cerPublisher}" -KeyExportPolicy Exportable -CertStoreLocation "Cert:\CurrentUser\My" -KeyUsageProperty Sign  -NotAfter '{expire}' -TextExtension @("2.5.29.37={{text}}{eku}");
-            Export-Certificate -Cert $cert -FilePath {outputPath}\{fileName}.cer;
-            $CertPassword = ConvertTo-SecureString -String "{password}" -Force -AsPlainText;
-            Export-PfxCertificate -Cert $cert -FilePath {outputPath}\{fileName}.pfx -Password $CertPassword;"""
-
-
-    out=powershell(cmd)
-    
-
-    
-
-def registerCertificate(cerPath):
-    out=powershell(f"Certutil -addStore TrustedPeople {cerPath}")
-
-    
-
-def getWindowsKitFolder():
-   confFolder= Settings().config['DEFAULT']['WindowsKitFolder']
-   if confFolder=='' or not os.path.exists(confFolder):
-      #TODO: search in  C:\Program Files (x86)\Windows Kits\10\bin\10.0.22000.0\x64 or near...
-        assert True,"WindowsKit not found"
-   
-   return confFolder
-   
-
-def isCertificatePresent():
-    savePath= Settings().config['certificate']['savePath']
-    certName =Settings().config['certificate']['certificateName']
-    if not os.path.isfile(f"{ savePath}/{ certName}.cer"):
-       return False
-    if not os.path.isfile(f"{ savePath}/{ certName}.pfx"):
-       return False
-       
-    return True
+from Include.CertUtil import *
+from Include.FTPwrapper import *
+from Include.winget_db import *
 
 def prepareWorkFolder():
     if os.path.exists(Settings().workFolder):
@@ -90,7 +41,22 @@ def main(argv):
         - firmo il pacchetto
         - deploy del pacchetto / yaml / installazioni su server
     """
+    #TODO: implementare "l'update"
+    #se i file sono già stati scaricati su server ( xke non ci sono aggiornamenti )
+        #posso confrontare lo sha256 del file eseguibile presente nellìo yaml
+        #o molto più semplicemente la versione / path dei file
+            #se uso la versione, posso controllare se il file yaml esiste sul mio server e se la "PackageVersion" e la "ManifestVersion" combaciano
+            #se si, ho già i file, altrimenti non li ho
+    #questi non vengono riscaricati e non vengono cancellati dal server durante il caricamento FTP
     
+    assert Settings().config["DEFAULT"]["updateType"]  in ["clean","update"], "INI error: [DEFAULT][updateType] not valid"
+    assert Settings().config["version"]["versionType"]  in ["auto","static","origin"], "INI error: [version][versionType] not valid"
+    assert Settings().config["winget"]["source"] != "", "INI error: [winget][source] not set"
+    assert Settings().config["winget"]["packetIDs"]  != "", "INI error: [winget][packetIDs] set at least one ID"
+
+    assert Settings().config["DEFAULT"]["updateType"] == "update" and Settings().config["deploy-ftp"]["baseURL"] != "", "INI error: [deploy-ftp][baseURL] must be set if [DEFAULT][updateType] == update"
+
+    #TODO: implemento gli altri assert... (SBATTA)
 
 
     parser = argparse.ArgumentParser(description="Create Zip64 files.")
@@ -198,9 +164,7 @@ def main(argv):
             os.remove(f"{Settings().workFolder}/AppxManifestForVersion.xml")
 
 
-            pass
-        else:
-            assert True, "INI error: [version][versionType] not valid"
+            pass            
         
 
         with open(f"{Settings().workFolder}/sourceNew/AppxManifest.xml", 'w') as file:
@@ -208,63 +172,66 @@ def main(argv):
     
 
         #modificare il db e mantenere i programmi che mi servono
-        packetIDsFormatted=",".join([ f"'{s.strip()}'" for s in Settings().config["winget"]["packetIDs"].split(",")])
-        print(packetIDsFormatted)
+        packetIDs=Settings().config["winget"]["packetIDs"].split(",")
         
-        con = sqlite3.connect(f"{Settings().workFolder}/sourceNew/Public/index.db")
-        
-        cur = con.cursor()
-        cur.execute(f"DELETE from ids where ids.id not in ({packetIDsFormatted})")
-        cur.execute(f"DELETE from manifest where id not in (SELECT rowid from ids) ")
-        cur.execute(f"DELETE from names where rowid not in (SELECT DISTINCT name from manifest) ")
-        cur.execute(f"DELETE from monikers where rowid not in (SELECT DISTINCT moniker from manifest) ")
-
-        cur.execute(f"DELETE from versions where rowid not in (SELECT DISTINCT version from manifest union SELECT DISTINCT arp_min_version from manifest union SELECT DISTINCT arp_max_version from manifest) ")
-
-        cur.execute(f"DELETE from commands_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-        cur.execute(f"DELETE from commands where rowid not in (SELECT DISTINCT command from commands_map)")
-        cur.execute(f"DELETE from norm_names_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-        cur.execute(f"DELETE from norm_names where rowid not in (SELECT DISTINCT norm_name from norm_names_map)")
-        cur.execute(f"DELETE from norm_publishers_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-        cur.execute(f"DELETE from norm_publishers where rowid not in (SELECT DISTINCT norm_publisher from norm_publishers_map)")
-        cur.execute(f"DELETE from pfns_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-        cur.execute(f"DELETE from pfns where rowid not in (SELECT DISTINCT pfn from pfns_map)")
-        cur.execute(f"DELETE from productcodes_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-        cur.execute(f"DELETE from productcodes where rowid not in (SELECT DISTINCT productcode from productcodes_map)")
-        cur.execute(f"DELETE from tags_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-        cur.execute(f"DELETE from tags where rowid not in (SELECT DISTINCT tag from tags_map)")
-        cur.execute(f"DELETE from upgradecodes_map where manifest not in (SELECT DISTINCT rowid from manifest) ")
-        cur.execute(f"DELETE from upgradecodes where rowid not in (SELECT DISTINCT upgradecode from upgradecodes_map)")
+        db = winget_db(f"{Settings().workFolder}/sourceNew/Public/index.db")
+        db.cleanByPacketIDs(packetIDs)       
+        yamlToDownloads = db.getYaml()
 
 
-        cur.execute(f"""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
-            SELECT p1.parent,p1.pathpart,p1.rowid 
-            FROM pathparts p1
-            WHERE p1.rowid in (SELECT pathpart from manifest ) 
+        if Settings().config["DEFAULT"]["updateType"]=="update":
+            myCurrentSource = f'{Settings().config["deploy-ftp"]["baseURL"]}/source.msix'
+            myCurrentSourceLocal=f"{Settings().workFolder}/myCurrentSource.msix"
+            download(myCurrentSource,myCurrentSourceLocal)
+            #estraggo il file index.db dal sorgente scaricato 
+            with zipfile.ZipFile(myCurrentSourceLocal, 'r') as zip:
+                with open(f"{Settings().workFolder}/index_myCurrentSource.db", 'wb') as f:
+                        f.write(zip.read("Public/index.db"))
+            os.remove(myCurrentSourceLocal)
 
-            UNION ALL
+            db = winget_db(f"{Settings().workFolder}/index_myCurrentSource.db")     
+            yamlOnMyServer = db.getYaml()
+            filesyamlOnMyServer=[yaml["path"] for yaml in yamlOnMyServer]
+           
+            
 
-            SELECT  p.parent,p.pathpart || '\' || c.path, c.rowidLastElement
-            FROM pathparts p
-            JOIN all_tree_pathparts c ON p.rowid = c.parent
-        )
-        delete from pathparts where rowid not in ( SELECT DISTINCT parent FROM all_tree_pathparts)""")
-        con.commit()
+            # - gli yaml già sul mio server
+            alreadyDownloaded = [yaml for yaml in yamlToDownloads if yaml["path"] in filesyamlOnMyServer ]
+            file_alreadyDownloaded = [yaml["path"] for yaml in alreadyDownloaded]
 
+            # - gli yaml che devo scaricare 
+            toDownload = [yaml for yaml in yamlToDownloads if yaml["path"] not in file_alreadyDownloaded ]
 
-        yamlToDownloads = [{"id":row[2],"path":row[1]} for row in cur.execute("""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
-            SELECT p1.parent,p1.pathpart,p1.rowid 
-            FROM pathparts p1
-            WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having rowid = max(rowid)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
+            
+            # - gli yaml che devo cancellare
+            toDelete = [yaml for yaml in yamlOnMyServer if yaml["path"] not in file_alreadyDownloaded ]
 
-            UNION ALL
+            
+            #TODO:
 
-            SELECT  p.parent,p.pathpart || '/' || c.path, c.rowidLastElement
-            FROM pathparts p
-            JOIN all_tree_pathparts c ON p.rowid = c.parent
-        )
+            """
+            scarico gli alreadyDownloaded sia dal mio server che da quello sorgente
+            confronto le versioni ( "PackageVersion" e la "ManifestVersion" ) 
+                se sono uguali -> non faccio nulla, non verranno riscaricati i file e nemmeno cancellati dal mio server
+                se sono diversi ->  aggiungo a toDownload e a toDelete lo yaml 
 
-        SELECT * FROM all_tree_pathparts where parent is NULL""")]
+            
+            scorro tutti i toDownload e li scarico normalmente ( come se fosse clean )
+
+            ATTENZIONE: in fase di cancellazione NON bisogna cancellare tutto!! 
+            occorre cancellare:
+            - source.msix
+            - tutte le cartelle / file presenti in toDelete 
+                prendo la cartella contenitore del file yaml da cancellare e la cancello ( dovrebbero esserci dentro anche tutti gli eseguibili )
+
+            lancio poi il comando 
+            ftp.removeAllEmptyFolder(Settings().config["deploy-ftp"]["FTPRemotePath"])
+            che cancella tutte le cartelle vuote ricorsivamente 
+
+            
+            """
+                       
+
 
 
         
@@ -304,14 +271,12 @@ def main(argv):
 
             #faccio l'hash SHA256 del file yaml e lo metto nel DB ( manifest -> hash  ) 
             sha = sha256(localYaml)
-            cur.execute(f"UPDATE manifest SET hash = x'{sha}' where pathpart= {el['id']}")
-            con.commit()
-        
+            db.updateManifestSHA(el["id"],sha)
 
 
+        db.close()
 
-
-        con.close()
+       
 
         #creo il pacchetto msix
         os.environ['PATH'] += os.pathsep + Settings().config['DEFAULT']['WindowsKitFolder']
@@ -332,28 +297,13 @@ def main(argv):
 
 
 
-class DownloadProgressBar(tqdm):
-    def update_to(self, b=1, bsize=1, tsize=None):
-        if tsize is not None:
-            self.total = tsize
-        self.update(b * bsize - self.n)
-
-def download(url, output_path):
-    with DownloadProgressBar(unit='B', unit_scale=True,
-                             miniters=1, desc=url.split('/')[-1]) as t:
-        urllib.request.urlretrieve(url, filename=output_path, reporthook=t.update_to)
 
 
-def sha256(filename):
-    sha256_hash = hashlib.sha256()
-    with open(filename,"rb") as f:
-        # Read and update hash string value in blocks of 4K
-        for byte_block in iter(lambda: f.read(4096),b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
 
 def pushViaFTP():
-    ftp = myFTP(Settings().config["deploy-ftp"]["host"],Settings().config["deploy-ftp"]["username"],Settings().config["deploy-ftp"]["password"] )
+    ftp = FTPwrapper(Settings().config["deploy-ftp"]["host"],Settings().config["deploy-ftp"]["username"],Settings().config["deploy-ftp"]["password"] )
+
+    
     ftp.remove_contents(Settings().config["deploy-ftp"]["FTPRemotePath"])
     ftp.push_contents(f'{Settings().workFolder}/ftp',Settings().config["deploy-ftp"]["FTPRemotePath"])
     pass
@@ -362,30 +312,6 @@ def pushViaFTP():
 
 
 
-
-class myFTP:
-    def __init__(self,host,user,pwd) -> None:
-        self.ftp = FTP(host)
-        self.ftp.login(user,pwd)
-        self.ftp.cwd(Settings().config["deploy-ftp"]["FTPRemotePath"]) 
-        pass
-
-    def remove_contents(self,path):
-        for (name, properties) in self.ftp.mlsd(path=path):
-            if name in ['.', '..']:
-                continue
-            elif properties['type'] == 'file':
-                self.ftp.delete(f"{path}/{name}")
-            elif properties['type'] == 'dir':
-                self.remove_contents(f"{path}/{name}")               
-                self.ftp.rmd(f"{path}/{name}")
-
-    def push_contents(self,localPath,remotePath):
-        if not os.path.exists(localPath):
-            return
-        
-        #TODO: completare la copia di tutti i file della cartella specificata nella path remota.
-        pass
 
 
 
