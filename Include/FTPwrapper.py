@@ -11,14 +11,18 @@ class FTPwrapper:
 
     def rmdir_contents(self,path):
         #cancella tutti i file e cartelle all'interno di un path fornito ( la cartella passata non viene cancellata)
-        for (name, properties) in self.ftp.mlsd(path=path):
-            if name in ['.', '..']:
-                continue
-            elif properties['type'] == 'file':
-                self.ftp.delete(f"{path}/{name}")
-            elif properties['type'] == 'dir':
-                self.remove_contents(f"{path}/{name}")               
-                self.ftp.rmd(f"{path}/{name}")
+        try:
+            for (name, properties) in self.ftp.mlsd(path=path):
+                if name in ['.', '..']:
+                    continue
+                elif properties['type'] == 'file':
+                    self.ftp.delete(f"{path}/{name}")
+                elif properties['type'] == 'dir':
+                    self.remove_contents(f"{path}/{name}")               
+                    self.ftp.rmd(f"{path}/{name}")
+            return True
+        except:
+            return False
 
     def push_contents(self,localPath,remotePath):
         #carica l'intera cartella "localPath" nel "remotePath" ( se il remote path non esiste, lo crea)

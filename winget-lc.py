@@ -70,7 +70,7 @@ def main(argv):
 
 
 
-    jmp =True
+    jmp =False
 
     if not jmp:
         pass
@@ -207,29 +207,53 @@ def main(argv):
             toDelete = [yaml for yaml in yamlOnMyServer if yaml["path"] not in file_alreadyDownloaded ]
 
             
-            #TODO:
-
-            """
-            scarico gli alreadyDownloaded sia dal mio server che da quello sorgente
-            confronto le versioni ( "PackageVersion" e la "ManifestVersion" ) 
-                se sono uguali -> non faccio nulla, non verranno riscaricati i file e nemmeno cancellati dal mio server
-                se sono diversi ->  aggiungo a toDownload e a toDelete lo yaml 
-
+            #confronto gli yaml 
             
-            scorro tutti i toDownload e li scarico normalmente ( come se fosse clean )
-
-            ATTENZIONE: in fase di cancellazione NON bisogna cancellare tutto!! 
-            occorre cancellare:
-            - source.msix
-            - tutte le cartelle / file presenti in toDelete 
-                prendo la cartella contenitore del file yaml da cancellare e la cancello ( dovrebbero esserci dentro anche tutti gli eseguibili )
-
-            lancio poi il comando 
-            ftp.removeAllEmptyFolder(Settings().config["deploy-ftp"]["FTPRemotePath"])
-            che cancella tutte le cartelle vuote ricorsivamente 
-
+            #scarico gli alreadyDownloaded sia dal mio server che da quello sorgente
             
-            """
+            for el in alreadyDownloaded:
+                try:
+                    localYamlMyServer= f'{Settings().workFolder}/compare/my/{el["path"]}'
+                    localYamlSourceServer= f'{Settings().workFolder}/compare/source/{el["path"]}'
+                    os.makedirs(os.path.dirname(localYamlMyServer),exist_ok=True)
+                    os.makedirs(os.path.dirname(localYamlSourceServer),exist_ok=True)
+
+
+                    
+                    download( f'{Settings().config["deploy-ftp"]["baseURL"]}/{el["path"]}',localYamlMyServer)
+                    download( f'{Settings().config["winget"]["source"]}/{el["path"]}',localYamlSourceServer)
+
+                    #analisi dello yaml 
+                    yamlDataMy=None
+                    yamlDataSouce=None
+
+                    with open(localYamlMyServer, "r") as stream:
+                        yamlDataMy= yaml.safe_load(stream)
+
+                    with open(localYamlSourceServer, "r") as stream:
+                        yamlDataSouce= yaml.safe_load(stream)
+
+                    # confronto le versioni ( "PackageVersion" e la "ManifestVersion" ) 
+                    #se sono uguali -> non faccio nulla, non verranno riscaricati i file e nemmeno cancellati dal mio server
+                    #se sono diversi ->  aggiungo a toDownload e a toDelete lo yaml 
+
+                    if yamlDataMy["PackageVersion"] != yamlDataSouce["PackageVersion"] or yamlDataMy["ManifestVersion"] != yamlDataSouce["ManifestVersion"]:
+                        #uno dei campi è diverso, lo devo riscaricare
+                        toDownload.append(el)
+                        toDelete.append(el) #devo anche cancellarlo da server
+
+
+                except:
+                    #c'è stato qualche problema ( parsing, file non trovato.... BHO)
+                    #in qualsiasi caso lo riscarico
+                    toDownload.append(el)
+                    toDelete.append(el) #devo anche cancellarlo da server
+
+
+            yamlToDownloads = toDownload    #setto la var yamlToDownloads cosi la parte successiva del codice funzioni normalmente come nel "clean"
+            Settings().misc["toDelete"] = toDelete  #mi tengo da parte i dati da cancellare 
+            
+          
                        
 
 
@@ -301,10 +325,32 @@ def main(argv):
 
 
 def pushViaFTP():
+
+
     ftp = FTPwrapper(Settings().config["deploy-ftp"]["host"],Settings().config["deploy-ftp"]["username"],Settings().config["deploy-ftp"]["password"] )
 
-    
-    ftp.remove_contents(Settings().config["deploy-ftp"]["FTPRemotePath"])
+    if Settings().config["DEFAULT"]["updateType"]=="update":
+        """
+        ATTENZIONE: in fase di cancellazione NON bisogna cancellare tutto!! 
+        occorre cancellare:
+        - source.msix
+        - tutte le cartelle / file presenti in toDelete 
+            prendo la cartella contenitore del file yaml da cancellare e la cancello ( dovrebbero esserci dentro anche tutti gli eseguibili )
+
+        lancio poi il comando 
+        ftp.removeAllEmptyFolder(Settings().config["deploy-ftp"]["FTPRemotePath"])
+        che cancella tutte le cartelle vuote ricorsivamente 
+        """
+        ftp.ftp.delete(f'{Settings().config["deploy-ftp"]["FTPRemotePath"]}/source.msix')
+        for el in Settings().misc["toDelete"]:
+            ftp.rmdir_contents(f'{Settings().config["deploy-ftp"]["FTPRemotePath"]}/{os.path.dirname(el["path"])}')
+        ftp.removeAllEmptyFolder(f'{Settings().config["deploy-ftp"]["FTPRemotePath"]}')
+            
+    else:   #clean
+        ftp.rmdir_contents(Settings().config["deploy-ftp"]["FTPRemotePath"])
+
+
+
     ftp.push_contents(f'{Settings().workFolder}/ftp',Settings().config["deploy-ftp"]["FTPRemotePath"])
     pass
 
