@@ -1,6 +1,8 @@
 from ftplib import FTP, error_perm
 from Include.settings import Settings
 import os.path
+import posixpath
+from Include.misc import UploadProgressBar
 
 class FTPwrapper:
     def __init__(self,host,user,pwd) -> None:
@@ -34,19 +36,36 @@ class FTPwrapper:
         current= self.ftp.pwd()
         self.ftp.cwd(remotePath)
         for name in os.listdir(localPath):
-            fulllocalpath = os.path.join(localPath, name)
+            fulllocalpath =posixpath.join(localPath, name)
+            
             if os.path.isfile(fulllocalpath):
                 #print("STOR", name, localpath)
-                self.ftp.storbinary('STOR ' + name, open(fulllocalpath,'rb'))
+                self.upload(fulllocalpath,name,True)
+                
             elif os.path.isdir(fulllocalpath):
                 #print("CWD", name)
-                fullRemotePath=os.path.join(remotePath, name)
+                
+                fullRemotePath=posixpath.join(remotePath, name)
                 self.push_contents( fulllocalpath,fullRemotePath)           
                 #print("CWD", "..")
         self.ftp.cwd(current)
               
 
+    def upload(self,localPath,remoteName,progressBar=False):
+        #carica il file specificato nella cartella corrente "CWD"
+        #progressBar permette di visualizzare una progressbar nella cli
+        if progressBar:
+            filesize = os.path.getsize(localPath)
+            with UploadProgressBar(unit='B', unit_scale=True,miniters=1, desc=localPath.split('/')[-1]) as t:      
+                t.total=filesize
+                self.ftp.storbinary('STOR ' + remoteName, open(localPath,'rb'), callback = lambda data: t.update(len(data)) )
+                t.update(1) #non so xke ma manca un byte per la progess... bha!
+        else:
+            self.ftp.storbinary('STOR ' + remoteName, open(localPath,'rb'))
+        
+
     def mkdir(self,path):
+
         try:
             self.ftp.mkd(path)
         # ignore "directory already exists"
@@ -92,6 +111,7 @@ class FTPwrapper:
         return self.path_exist(path) or self.file_exist(path)
 
     def getContents(self,path):
+        #ritorna la lista di file e cartelle del path specificato
         contents= self.ftp.mlsd(path=path)
         ret=[]
         for (name, properties) in contents:

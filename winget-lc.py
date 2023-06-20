@@ -54,7 +54,7 @@ def main(argv):
     assert Settings().config["winget"]["source"] != "", "INI error: [winget][source] not set"
     assert Settings().config["winget"]["packetIDs"]  != "", "INI error: [winget][packetIDs] set at least one ID"
 
-    assert Settings().config["DEFAULT"]["updateType"] == "update" and Settings().config["deploy-ftp"]["baseURL"] != "", "INI error: [deploy-ftp][baseURL] must be set if [DEFAULT][updateType] == update"
+    assert Settings().config["DEFAULT"]["updateType"] == "clean" or (Settings().config["DEFAULT"]["updateType"] == "update" and Settings().config["deploy-ftp"]["baseURL"] != ""), "INI error: [deploy-ftp][baseURL] must be set if [DEFAULT][updateType] == update"
 
 
     #TODO: implemento gli altri assert... (SBATTA)
