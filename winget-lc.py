@@ -48,13 +48,14 @@ def main(argv):
             #se uso la versione, posso controllare se il file yaml esiste sul mio server e se la "PackageVersion" e la "ManifestVersion" combaciano
             #se si, ho già i file, altrimenti non li ho
     #questi non vengono riscaricati e non vengono cancellati dal server durante il caricamento FTP
-    
+    assert os.path.exists('config.ini'), "File 'config.ini' missing; copy 'config-DEFAULT.ini' to 'config.ini' and edit"
     assert Settings().config["DEFAULT"]["updateType"]  in ["clean","update"], "INI error: [DEFAULT][updateType] not valid"
     assert Settings().config["version"]["versionType"]  in ["auto","static","origin"], "INI error: [version][versionType] not valid"
     assert Settings().config["winget"]["source"] != "", "INI error: [winget][source] not set"
     assert Settings().config["winget"]["packetIDs"]  != "", "INI error: [winget][packetIDs] set at least one ID"
 
     assert Settings().config["DEFAULT"]["updateType"] == "update" and Settings().config["deploy-ftp"]["baseURL"] != "", "INI error: [deploy-ftp][baseURL] must be set if [DEFAULT][updateType] == update"
+
 
     #TODO: implemento gli altri assert... (SBATTA)
 
