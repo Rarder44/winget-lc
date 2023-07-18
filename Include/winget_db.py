@@ -1,4 +1,7 @@
 import sqlite3
+import gc
+
+
 
 class winget_db:
 
@@ -82,6 +85,7 @@ class winget_db:
     def close(self):
         self.con.close()
         self.isClosed=True
+        gc.collect()        #se no potrebbe rimanere aperto il file...
 
     def __reopenIfClosed(self):
         if self.isClosed:

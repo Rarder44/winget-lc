@@ -112,7 +112,7 @@ class FTPwrapper:
 
     def getContents(self,path):
         #ritorna la lista di file e cartelle del path specificato
-        contents= self.ftp.mlsd(path=path)
+        contents= self.ftp.mlsd(path=path)          #TODO: non supportato da iis -> usare un altro comando! ( nlst ?? )
         ret=[]
         for (name, properties) in contents:
             if name in ['.', '..']:

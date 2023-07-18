@@ -11,10 +11,12 @@ from Include.settings import Settings
 import yaml
 import os
 from urllib.parse import urlparse
+import time
 
 from Include.CertUtil import *
 from Include.FTPwrapper import *
 from Include.winget_db import *
+
 
 def prepareWorkFolder():
     if os.path.exists(Settings().workFolder):
@@ -301,7 +303,7 @@ def main(argv):
 
         db.close()
 
-       
+        time.sleep(1)       #per essere sicuri che il file è chiuso
 
         #creo il pacchetto msix
         os.environ['PATH'] += os.pathsep + Settings().config['DEFAULT']['WindowsKitFolder']
