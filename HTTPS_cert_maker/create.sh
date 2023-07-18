@@ -23,6 +23,7 @@ openssl x509 -in ./out/server.pem -out ./out/server.crt -inform PEM -outform DER
 #unisco i PEM in una catena di certificati
 cat ./out/server.pem ./out/ssl/rootCA.pem  > ./out/chain.pem
 #esporto la catena e la chiave dell'ultimo certificato in un file pfx ( dovrebbe funzionare! ) 
+cp ./out/server.key ./out/chain.key
 openssl pkcs12 -export -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -nomac -inkey ./out/chain.key -in ./out/chain.pem -out ./out/server.pfx -name 'jmwinget_cert_https'
 
 
@@ -31,7 +32,6 @@ openssl pkcs12 -export -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -nomac -inke
 #il nome del pem e della key devono combaciare!!
 #il comando certutil fa tutto lui
 #cd out
-#cp server.key chain.key
 #certutil -mergepfx chain.pem cert.pfx
 
 
