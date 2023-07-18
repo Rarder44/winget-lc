@@ -1,3 +1,7 @@
+per ignorare il problema 0x8a15005e : The server certificate did not match any of the expected values
+	winget settings --enable BypassCertificatePinningForMicrosoftStore.
+
+
 https://stackoverflow.com/questions/61916158/structure-of-winget-source-repositories
 https://stackoverflow.com/questions/19958829/where-can-i-find-makecert-exe-visual-studio-ultimate-2012
 https://learn.microsoft.com/en-us/windows/win32/appxpkg/how-to-create-a-package-signing-certificate
