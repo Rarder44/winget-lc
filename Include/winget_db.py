@@ -55,7 +55,13 @@ class winget_db:
             FROM pathparts p
             JOIN all_tree_pathparts c ON p.rowid = c.parent
         )
-        delete from pathparts where rowid not in ( SELECT DISTINCT parent FROM all_tree_pathparts)""")
+        delete from pathparts where rowid not in (
+		select * from(
+			SELECT DISTINCT parent FROM all_tree_pathparts 
+				union 
+			SELECT DISTINCT rowidLastElement FROM all_tree_pathparts
+			) where parent not null
+		)""")
         self.con.commit()
 
     def getYaml(self):

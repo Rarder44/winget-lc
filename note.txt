@@ -76,7 +76,7 @@ apertura connessione ssh :
 
 installare programma
 	winget install Putty.Putty -v 0.74.0.0 --scope machine
-
+	winget install Notepad++.Notepad++ --source jm --scope machine
 
 risoluzione problema admin
 	usare la 1.5.441-preview
@@ -216,7 +216,13 @@ DELETE from upgradecodes where rowid not in (SELECT DISTINCT upgradecode from up
 		FROM pathparts p
 		JOIN all_tree_pathparts c ON p.rowid = c.parent
 	)
-	delete from pathparts where rowid not in ( SELECT DISTINCT parent FROM all_tree_pathparts);
+	delete from pathparts where rowid not in (
+		select * from(
+			SELECT DISTINCT parent FROM all_tree_pathparts 
+				union 
+			SELECT DISTINCT rowidLastElement FROM all_tree_pathparts
+			) where parent not null
+		)
 
 
 	SELECT * FROM all_tree_pathparts where parent is NULL
