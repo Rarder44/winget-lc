@@ -102,7 +102,6 @@ def main(argv):
         originSourceLocal= f'{Settings().workFolder}'
         originSourceLocal,_= download(f'{Settings().config["winget"]["source"]}/source.msix',originSourceLocal,"source.msix")
         
-        download(f'{Settings().config["winget"]["source"]}/source.msix',originSourceLocal)
         #estraggo i file
         with zipfile.ZipFile(originSourceLocal, 'r') as zip:
             with open(f"{Settings().workFolder}/sourceNew/Public/index.db", 'wb') as f:
@@ -195,8 +194,8 @@ def main(argv):
                         f.write(zip.read("Public/index.db"))
             os.remove(myCurrentSourceLocal)
 
-            db = winget_db(f"{Settings().workFolder}/index_myCurrentSource.db")     
-            yamlOnMyServer = db.getYaml()
+            db2 = winget_db(f"{Settings().workFolder}/index_myCurrentSource.db")     
+            yamlOnMyServer = db2.getYaml()
             filesyamlOnMyServer=[yaml["path"] for yaml in yamlOnMyServer]
            
             
@@ -212,7 +211,10 @@ def main(argv):
             # - gli yaml che devo cancellare
             toDelete = [yaml for yaml in yamlOnMyServer if yaml["path"] not in file_alreadyDownloaded ]
 
-            
+            # - yaml che non devo riscaricare ma devo comunque ricalcolare lo sha256 ed applicarlo al db
+            toReSHA = []
+
+
             #confronto gli yaml 
             
             #scarico gli alreadyDownloaded sia dal mio server che da quello sorgente
@@ -225,9 +227,15 @@ def main(argv):
                     os.makedirs(os.path.dirname(localYamlSourceServer),exist_ok=True)
 
 
-                    
-                    download( f'{Settings().config["deploy-ftp"]["baseURL"]}/{el["path"]}',localYamlMyServer)
-                    download( f'{Settings().config["winget"]["source"]}/{el["path"]}',localYamlSourceServer)
+                    localYamlMyServerPath= os.path.dirname(localYamlMyServer)
+                    localYamlMyServerFileName= os.path.basename(localYamlMyServer)
+
+                    localYamlSourceServerPath= os.path.dirname(localYamlSourceServer)
+                    localYamlSourceServerFileName= os.path.basename(localYamlSourceServer)
+
+                    download( f'{Settings().config["deploy-ftp"]["baseURL"]}/{el["path"]}',localYamlMyServerPath,localYamlMyServerFileName)
+                    download( f'{Settings().config["winget"]["source"]}/{el["path"]}',localYamlSourceServerPath,localYamlSourceServerFileName)
+
 
                     #analisi dello yaml 
                     yamlDataMy=None
@@ -247,7 +255,9 @@ def main(argv):
                         #uno dei campi è diverso, lo devo riscaricare
                         toDownload.append(el)
                         toDelete.append(el) #devo anche cancellarlo da server
-
+                    else:
+                        #se non devo riscaricarlo, devo solo ricalcolare lo sha256
+                        toReSHA.append(el)
 
                 except:
                     #c'è stato qualche problema ( parsing, file non trovato.... BHO)
@@ -310,7 +320,13 @@ def main(argv):
             sha = sha256(localYaml)
             db.updateManifestSHA(el["id"],sha)
 
+        for el in toReSHA:
+            #se è da re-sha l'ho scaricato nella cartella compare
+            localYaml= f'{Settings().workFolder}/compare/my/{el["path"]}'
+            sha = sha256(localYaml)
+            db.updateManifestSHA(el["id"],sha)
 
+            
         db.close()
 
         time.sleep(1)       #per essere sicuri che il file è chiuso
