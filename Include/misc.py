@@ -4,7 +4,10 @@ import os.path
 import urllib.request
 from tqdm import tqdm
 import hashlib
-
+import cgi
+import re
+import requests
+import werkzeug
 
 def powershell(command):
    return subprocess.run(["powershell", "-command", command], capture_output=True)
@@ -29,9 +32,44 @@ class DownloadProgressBar(tqdm):
 class UploadProgressBar(tqdm):
     pass
 
-def download(url, output_path):
-    with DownloadProgressBar(unit='B', unit_scale=True,miniters=1, desc=url.split('/')[-1]) as t:
-        urllib.request.urlretrieve(url, filename=output_path, reporthook=t.update_to)
+
+
+    
+
+
+def getDownloadFileName(url):
+
+    #url = "https://sourceforge.net/projects/winscp/files/WinSCP/6.1.1/WinSCP-6.1.1-Setup.exe/download"
+    #url="https://cdn.winget.microsoft.com/cache/source.msix"
+    try:
+        with requests.get(url) as req:
+            if content_disposition := req.headers.get("Content-Disposition"):
+                param, options = werkzeug.http.parse_options_header(content_disposition)
+                if param == 'attachment' and (filename := options.get('filename')):
+                    return filename
+
+            path = urllib.parse.urlparse(req.url).path
+            name = path[path.rfind('/') + 1:]
+            return name
+    except requests.exceptions.RequestException as e:
+        raise e
+
+
+def download(url, output_path:str,overrideOutName):
+    #ritorna un tupla con ( path completo del file sacricato, nome nome del file )
+
+    #cerco di recupeare il nome dal sito
+    if overrideOutName is None:
+        #url = "https://sourceforge.net/projects/winscp/files/WinSCP/6.1.1/WinSCP-6.1.1-Setup.exe/download"
+        overrideOutName = getDownloadFileName(url)
+
+
+    outFilePath=output_path.rstrip("\\/")+"/"+overrideOutName
+    with DownloadProgressBar(unit='B', unit_scale=True,miniters=1, desc=overrideOutName) as t:
+        urllib.request.urlretrieve(url, filename=outFilePath, reporthook=t.update_to)
+        
+    return outFilePath ,overrideOutName
+
 
 
 def sha256(filename):

@@ -99,7 +99,9 @@ def main(argv):
             os.mkdir(f'{Settings().workFolder}/sourceNew/Public')
 
         #scaricare il file source.msix
-        originSourceLocal= f'{Settings().workFolder}/source.msix'
+        originSourceLocal= f'{Settings().workFolder}'
+        originSourceLocal,_= download(f'{Settings().config["winget"]["source"]}/source.msix',originSourceLocal,"source.msix")
+        
         download(f'{Settings().config["winget"]["source"]}/source.msix',originSourceLocal)
         #estraggo i file
         with zipfile.ZipFile(originSourceLocal, 'r') as zip:
@@ -121,7 +123,7 @@ def main(argv):
         if Settings().config["version"]["versionType"]=="auto":
             #scarico la vecchia versione
 
-            download(f'{Settings().config["deploy-ftp"]["baseURL"]}/source.msix',f'{Settings().workFolder}/sourceOld.msix')
+            download(f'{Settings().config["deploy-ftp"]["baseURL"]}/source.msix',f'{Settings().workFolder}','sourceOld.msix')
 
 
             #estraggo il file AppxManifest.xml
@@ -184,8 +186,9 @@ def main(argv):
 
         if Settings().config["DEFAULT"]["updateType"]=="update":
             myCurrentSource = f'{Settings().config["deploy-ftp"]["baseURL"]}/source.msix'
-            myCurrentSourceLocal=f"{Settings().workFolder}/myCurrentSource.msix"
-            download(myCurrentSource,myCurrentSourceLocal)
+            myCurrentSourceLocal=f"{Settings().workFolder}"
+            myCurrentSourceLocal,_=download(myCurrentSource,myCurrentSourceLocal,"myCurrentSource.msix")
+
             #estraggo il file index.db dal sorgente scaricato 
             with zipfile.ZipFile(myCurrentSourceLocal, 'r') as zip:
                 with open(f"{Settings().workFolder}/index_myCurrentSource.db", 'wb') as f:
@@ -269,9 +272,12 @@ def main(argv):
         for el in yamlToDownloads:
 
             localYaml= f'{Settings().workFolder}/ftp/{el["path"]}'
-            os.makedirs(os.path.dirname(localYaml),exist_ok=True)
+            localYamlDir= os.path.dirname(localYaml)
+            localYamlName= os.path.basename(localYaml)
+            os.makedirs(localYamlDir,exist_ok=True)
 
-            download( f'{Settings().config["winget"]["source"]}/{el["path"]}',localYaml)
+            download( f'{Settings().config["winget"]["source"]}/{el["path"]}',localYamlDir,localYamlName)
+            
             #analisi dello yaml 
             yamlData=None
 
@@ -282,10 +288,14 @@ def main(argv):
             i = 0
             for installer in yamlData["Installers"]:
                 a = urlparse(installer["InstallerUrl"])
-                newFileName = f"{i}_{os.path.basename(a.path)}"
-                newFilePath=f"{Settings().workFolder}/ftp/{os.path.dirname(el['path'])}/{newFileName}"
+                downloadUrl=installer["InstallerUrl"]
+                newFileName = f"{i}_{getDownloadFileName(downloadUrl)}"
+                newFilePath=f"{Settings().workFolder}/ftp/{os.path.dirname(el['path'])}"
                 newFileUrl= f'{Settings().config["deploy-ftp"]["baseURL"]}/{os.path.dirname(el["path"])}/{newFileName}'
-                download(installer["InstallerUrl"],newFilePath)
+                
+                newFilePath,newFileName=download(installer["InstallerUrl"],newFilePath,newFileName)
+
+                
                 i=i+1
                 #modifico il link d'installazione
                 installer["InstallerUrl"]=newFileUrl

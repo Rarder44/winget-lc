@@ -4,3 +4,4 @@ PyWin32
 pyyaml
 tqdm
 requests
+werkzeug
