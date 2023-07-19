@@ -331,6 +331,8 @@ def pushViaFTP():
 
 
     ftp = FTPwrapper(Settings().config["deploy-ftp"]["host"],Settings().config["deploy-ftp"]["username"],Settings().config["deploy-ftp"]["password"] )
+    ftp.cd(Settings().config["deploy-ftp"]["FTPRemotePath"]) 
+
 
     if Settings().config["DEFAULT"]["updateType"]=="update":
         """
@@ -365,6 +367,12 @@ def pushViaFTP():
 
 
 if __name__ == '__main__':
+
+    #ftp = FTPwrapper("192.168.100.200","ftp_jmwinget","Upload.123!!!")
+    #ftp = FTPwrapper(Settings().config["deploy-ftp"]["host"],Settings().config["deploy-ftp"]["username"],Settings().config["deploy-ftp"]["password"] )
+    #ftp.getContents("/")
+    #exit()
+
     #run as admin
     if not pyuac.isUserAdmin():
         print("Re-launching as admin!")

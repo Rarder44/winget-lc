@@ -1,15 +1,39 @@
 from ftplib import FTP, error_perm
-from Include.settings import Settings
 import os.path
 import posixpath
 from Include.misc import UploadProgressBar
+from enum import Enum
+
+class FTPsystem(Enum):
+    Linux=1
+    Windows=2
+    Auto=3
 
 class FTPwrapper:
-    def __init__(self,host,user,pwd) -> None:
+    def __init__(self,host,user,pwd,system : FTPsystem =FTPsystem.Auto ) -> None:
         self.ftp = FTP(host)
         self.ftp.login(user,pwd)
-        self.ftp.cwd(Settings().config["deploy-ftp"]["FTPRemotePath"]) 
+        
+        if system==FTPsystem.Auto:
+            self.system=self.detectSystem()
+        else:
+            self.system=system
+        
         pass
+
+    def detectSystem(self):
+        system_type = self.ftp.sendcmd("SYST")
+        if "UNIX" in system_type.upper():
+            return FTPsystem.Linux
+        elif "WINDOWS" in system_type.upper():
+           return FTPsystem.Windows
+        else:
+            #BHO -> spero linux
+            return FTPsystem.Linux
+       
+
+    def cd(self,path):
+        self.ftp.cwd(path)
 
     def rmdir_contents(self,path):
         #cancella tutti i file e cartelle all'interno di un path fornito ( la cartella passata non viene cancellata)
@@ -112,13 +136,61 @@ class FTPwrapper:
 
     def getContents(self,path):
         #ritorna la lista di file e cartelle del path specificato
-        contents= self.ftp.mlsd(path=path)          #TODO: non supportato da iis -> usare un altro comando! ( nlst ?? )
-        ret=[]
-        for (name, properties) in contents:
-            if name in ['.', '..']:
-                    continue
-            ret.append((name, properties))
-        return ret
+        if self.system==FTPsystem.Linux:
+            contents= self.ftp.mlsd(path=path)
+            ret=[]
+            for (name, properties) in contents:
+                if name in ['.', '..']:
+                        continue
+                ret.append((name, properties))
+            return ret
+        elif self.system==FTPsystem.Windows:
+
+
+            current= self.ftp.pwd()
+            self.ftp.cwd(path)
+
+            contents= self.ftp.nlst() 
+            ret=[]
+            for name in contents:
+                if name in ['.', '..']:
+                        continue
+
+                properties={
+                    'type':"",
+                    'sizd':"",
+                    'modify':""
+                }
+                #controllo se è una cartella o un file
+                c= self.ftp.pwd()
+                try:
+                    self.ftp.cwd(name)
+                    #ci sono entrato, allora è una cartella
+                    properties["type"]="dir"
+                    self.ftp.cwd(c)
+                except:
+                    properties["type"]="file"
+
+                #peso
+                size=self.ftp.sendcmd(f"SIZE {name}").split(" ")
+                if size[0]=="213":
+                    properties["sizd"]=size[1]
+                
+                #ultima modifica
+                mdtm=self.ftp.sendcmd(f"MDTM {name}").split(" ")
+                if mdtm[0]=="213":
+                    properties["modify"]=mdtm[1]
+                
+                
+                ret.append((name, properties))
+
+            self.ftp.cwd(current)
+            return ret
+
+            pass
+        else:
+            raise "System not implemented"
+        
 
     def removeAllEmptyFolder(self,path):
         #cancella tutte le cartelle vuote presenti in tutte le sottocartelle di "path"
