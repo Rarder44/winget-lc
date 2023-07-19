@@ -80,6 +80,30 @@ installare programma
 
 risoluzione problema admin
 	usare la 1.5.441-preview
+
+
+installare / aggiornare il sorgente da remoto ( ssh )
+	occorre scaricare sulla macchina il file source.msix  ( ssl-no-revoke per evitare problemi con i certificati self signed )
+		curl.exe --output source.msix --url https://jmwinget.local/winget/source.msix --ssl-no-revoke
+	ed installarlo tramite powershell 
+		Add-AppPackage .\source.msix
+
+
+TODO: 
+creo comando powershell che scorre tutte le source di winget e scarica tutti i source.msix e li installa
+-winget source list 
+-prendo l'output della prima riga 
+-identifico "Nome" e "Argomento" ( magari possono essere in altre lingue )
+-prendo la posizione del carattere "A" di "Argomento"
+-salto la riga con i trattini  (------------------- riga 2)
+-tutte le successive splitto la stringa nella posizione trovata prima e mi salvo nome del pacchetto ( non serve in realtà... ) e url
+-all'url aggiungo "source.msix" e scarico per ciascuno il pacchetto 
+	curl.exe --output source.msix --url https://jmwinget.local/winget/source.msix --ssl-no-revoke
+-installo il pacchetto
+	Add-AppPackage .\source.msix
+
+
+	
 	
 	
 per firmare C:\Program Files (x86)\Windows Kits\10\bin\10.0.22000.0\x64\signtool 
@@ -238,11 +262,11 @@ Select * from (SELECT * from manifest GROUP BY id having version = max(version))
 	WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
 		SELECT p1.parent,p1.pathpart,p1.rowid 
 		FROM pathparts p1
-		WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having version = max(version)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
+		WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having rowid = max(rowid)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
 
 		UNION ALL
 
-		SELECT  p.parent,p.pathpart || '\' || c.path, c.rowidLastElement
+		SELECT  p.parent,p.pathpart || '/' || c.path, c.rowidLastElement
 		FROM pathparts p
 		JOIN all_tree_pathparts c ON p.rowid = c.parent
 	)
