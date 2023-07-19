@@ -158,8 +158,8 @@ class FTPwrapper:
 
                 properties={
                     'type':"",
-                    'sizd':"",
-                    'modify':""
+                    'sizd':"0",
+                    'modify':"0"
                 }
                 #controllo se è una cartella o un file
                 c= self.ftp.pwd()
@@ -171,17 +171,21 @@ class FTPwrapper:
                 except:
                     properties["type"]="file"
 
-                #peso
-                size=self.ftp.sendcmd(f"SIZE {name}").split(" ")
-                if size[0]=="213":
-                    properties["sizd"]=size[1]
-                
+                 #peso
+                if properties["type"]=="file":
+                   
+                    size=self.ftp.sendcmd(f"SIZE {name}").split(" ")
+                    if size[0]=="213":
+                        properties["sizd"]=size[1]
+                        
                 #ultima modifica
-                mdtm=self.ftp.sendcmd(f"MDTM {name}").split(" ")
-                if mdtm[0]=="213":
-                    properties["modify"]=mdtm[1]
+                if properties["type"]=="file":
+                    mdtm=self.ftp.sendcmd(f"MDTM {name}").split(" ")
+                    if mdtm[0]=="213":
+                        properties["modify"]=mdtm[1]
+                    
                 
-                
+
                 ret.append((name, properties))
 
             self.ftp.cwd(current)
