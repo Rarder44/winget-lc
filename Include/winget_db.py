@@ -70,8 +70,10 @@ class winget_db:
         return [{"id":row[2],"path":row[1]} for row in cur.execute("""WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
             SELECT p1.parent,p1.pathpart,p1.rowid 
             FROM pathparts p1
-            WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having rowid = max(rowid)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
-
+            WHERE p1.rowid in (SELECT pathpart from (
+								SELECT * from manifest INNER JOIN versions on ( versions.rowid = manifest.version ) GROUP BY id having versions.version = max(versions.version)
+						) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
+                                                                   
             UNION ALL
 
             SELECT  p.parent,p.pathpart || '/' || c.path, c.rowidLastElement

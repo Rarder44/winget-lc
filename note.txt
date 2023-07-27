@@ -256,22 +256,31 @@ DELETE from upgradecodes where rowid not in (SELECT DISTINCT upgradecode from up
 	
 #recupera l'ultima versione per ogni programama
 Select * from (SELECT * from manifest GROUP BY id having version = max(version)) as t INNER JOIN versions on ( versions.rowid = t.version ) 
+#QUESTA SOPRA NON FUNZIONA! SEMBRA CHE L'UNICO MODO SIA ORDINARE PER NOME LE VERSIONI -> versione aggiornata qua sotto
+SELECT * from (
+	SELECT * from manifest INNER JOIN versions on ( versions.rowid = manifest.version ) GROUP BY id having versions.version = max(versions.version)
+) as t INNER JOIN versions on ( versions.rowid = t.version )
+
 
 #recupera i pathpart degli yaml da scaricare ( ultima versione ) -> unione delle 2 query precedenti
 
 	WITH RECURSIVE all_tree_pathparts (parent,path,rowidLastElement) AS (
-		SELECT p1.parent,p1.pathpart,p1.rowid 
-		FROM pathparts p1
-		WHERE p1.rowid in (SELECT pathpart from (SELECT * from manifest GROUP BY id having rowid = max(rowid)) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
+            SELECT p1.parent,p1.pathpart,p1.rowid 
+            FROM pathparts p1
+            WHERE p1.rowid in (SELECT pathpart from (
 
-		UNION ALL
+								SELECT * from manifest INNER JOIN versions on ( versions.rowid = manifest.version ) GROUP BY id having versions.version = max(versions.version)
 
-		SELECT  p.parent,p.pathpart || '/' || c.path, c.rowidLastElement
-		FROM pathparts p
-		JOIN all_tree_pathparts c ON p.rowid = c.parent
-	)
+						) as t INNER JOIN versions on ( versions.rowid = t.version ) ) 
 
-	SELECT * FROM all_tree_pathparts where parent is NULL
+            UNION ALL
+
+            SELECT  p.parent,p.pathpart || '/' || c.path, c.rowidLastElement
+            FROM pathparts p
+            JOIN all_tree_pathparts c ON p.rowid = c.parent
+        )
+
+        SELECT * FROM all_tree_pathparts where parent is NULL
 	
 	
 
